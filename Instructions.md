@@ -20,7 +20,7 @@
   - [Tests](#tests)
 - [Prepare your Inbenta instances](#prepare-your-inbenta-instances)
   - [Text Content](#text-content)
-  - [Farewell content](#farewell-content)
+
 
 # **Introduction**
 
@@ -110,7 +110,7 @@ Add a unique name and a description for the bot. Click on "Create bot":
 
 ### Intents
 
-The purpose of this step is to be sure that every intentreceived by Twilio is redirected to Inbenta to get a response form the chatbot.
+The purpose of this step is to be sure that every intent received by Twilio is redirected to Inbenta to get a response form the chatbot.
 
 In your bot options, go to **Tasks** and for every existing Task (except _collect_fallback_) click on **Program**:
 
@@ -197,11 +197,3 @@ Hence, content should be simple text: **avoid the use of HTML tags, multimedia a
 
 Note: “**Natural Language Search**” is the best **Transition type** for dialogs.
 
-# TODO CHECK
-
-## Farewell content
-
-You can add a command that detects the intent of end the call using voice. This is possible adding a new content with title “**Exit**” (or any other similar with the same context). Inside the content, additionally to the ANSWET_TEXT, you’ll need 2 things:
-
-- Check **directCall** and set the text "**sys-goodbye**"
-- Add "**Learn with semantic expansion**" with the variations to end a call (like "goodbye", "end call", etc).
