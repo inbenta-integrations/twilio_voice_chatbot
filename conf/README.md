@@ -23,7 +23,7 @@ return array(
     // Chatbot API credentials
     'api' => '/api.php',
 
-    // Hyperchat configuration
+    // Livechat configuration
     'chat' => '/chat.php',
 
     // Chatbot API conversation

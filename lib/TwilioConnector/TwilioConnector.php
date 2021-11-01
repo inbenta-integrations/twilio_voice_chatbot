@@ -8,8 +8,6 @@ use Inbenta\ChatbotConnector\Utils\SessionManager;
 use Inbenta\ChatbotConnector\ChatbotAPI\ChatbotAPIClient;
 use Inbenta\TwilioConnector\ExternalAPI\TwilioAPIClient;
 use Inbenta\TwilioConnector\ExternalDigester\TwilioDigester;
-use Inbenta\TwilioConnector\HyperChatAPI\TwilioHyperChatClient;
-
 
 class TwilioConnector extends ChatbotConnector
 {
@@ -40,9 +38,9 @@ class TwilioConnector extends ChatbotConnector
             $this->getTranslationsFromExtraInfo('twilio', 'translations');
 
             // Instance application components
-            $externalClient        = new TwilioAPIClient(); // Instance Twilio client
-            $chatClient            = new TwilioHyperChatClient($this->conf->get('chat.chat'), $this->lang, $this->session, $this->conf, $externalClient);  // Instance HyperchatClient for Twilio
+            $externalClient        = new TwilioAPIClient($this->conf->get('twilio.transfer_function_url')); // Instance Twilio client
             $externalDigester      = new TwilioDigester($this->lang, $this->conf->get('conversation.digester'), $this->session); // Instance Twilio digester
+            $chatClient            = null;
 
             $this->initComponents($externalClient, $chatClient, $externalDigester);
         } catch (Exception $e) {
@@ -70,7 +68,7 @@ class TwilioConnector extends ChatbotConnector
     }
 
     /**
-     * Return external id from request (Hyperchat of Twilio)
+     * Return external id from request (Twilio)
      */
     protected function getExternalIdFromRequest()
     {
@@ -93,19 +91,17 @@ class TwilioConnector extends ChatbotConnector
             // Translate the request into a ChatbotAPI request
             $externalRequest = $this->digester->digestToApi($request);
             // Check if it's needed to perform any action other than a standard user-bot interaction
-            $nonBotResponse = $this->handleNonBotActions($externalRequest);
-            if (!is_null($nonBotResponse)) {
-                return $nonBotResponse;
-            }
+            $this->handleNonBotActions($externalRequest);
+
             // Handle standard bot actions
             $this->handleBotActions($externalRequest);
+
             // Send all messages
             return $this->externalClient->sendMessage($this->messages);
         } catch (Exception $e) {
             return ["error" => $e->getMessage()];
         }
     }
-
 
     protected function sendMessagesToExternal($messages)
     {
@@ -123,9 +119,8 @@ class TwilioConnector extends ChatbotConnector
     {
         // If user answered to an ask-to-escalate question, handle it
         if ($this->session->get('askingForEscalation', false)) {
-            return $this->handleEscalation($digestedRequest);
+            $this->handleEscalation($digestedRequest);
         }
-        return null;
     }
 
     /**
@@ -133,15 +128,43 @@ class TwilioConnector extends ChatbotConnector
      */
     protected function handleEscalation($userAnswer = null)
     {
-        $this->messages .=  ". " . $this->lang->translate('no_escalation_supported');
-        $this->externalClient->sendTextMessage($this->messages);
-    }
+        // Ask the user if wants to escalate
+        if (!$this->session->get('askingForEscalation', false)) {
+            if ($this->session->get('escalationType') == static::ESCALATION_DIRECT) {
+                $this->messages .=  ". " . $this->lang->translate('creating_chat');
+                $this->externalClient->sendTextMessage($this->messages, true);
+            } else {
+                // Ask the user if wants to escalate
+                $this->session->set('askingForEscalation', true);
+                $this->messages .= '. ' . $this->digester->buildEscalationMessage();
+                $this->externalClient->sendMessage($this->messages);
+            }
+        } else {
+            // Handle user response to an escalation question
+            $this->session->set('askingForEscalation', false);
+            // Reset escalation counters
+            $this->session->set('noResultsCount', 0);
+            $this->session->set('negativeRatingCount', 0);
 
-    /**
-     *	Override useless function from parent
-     */
-    protected function returnOkResponse()
-    {
-        return true;
+            if (isset($userAnswer[0]['escalateOption'])) {
+                if ($userAnswer[0]['escalateOption']) {
+                    $this->messages .= ". " . $this->lang->translate('creating_chat');
+                    $this->externalClient->sendTextMessage($this->messages, true);
+                } else {
+                    if ($this->session->get('escalationType') == static::ESCALATION_OFFER) {
+                        $message = ["message" => "no"];
+                        $botResponse = $this->sendMessageToBot($message);
+                        $this->sendMessagesToExternal($botResponse);
+                    } else {
+                        $this->sendMessagesToExternal($this->buildTextMessage($this->lang->translate('escalation_rejected')));
+                        $this->trackContactEvent("CONTACT_REJECTED");
+                    }
+                    $this->session->delete('escalationType');
+                    $this->session->delete('escalationV2');
+                    $this->externalClient->sendMessage($this->messages, true);
+                }
+                die();
+            }
+        }
     }
 }

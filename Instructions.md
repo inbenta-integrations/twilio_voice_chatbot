@@ -17,10 +17,10 @@
     - [Intents](#intents)
     - [Account and Assistant SID](#account-and-assistant-sid)
   - [Voice Configuration](#voice-configuration)
+  - [Escalation (phone transfer)](#escalation-phone-transfer)
   - [Tests](#tests)
 - [Prepare your Inbenta instances](#prepare-your-inbenta-instances)
   - [Text Content](#text-content)
-
 
 # **Introduction**
 
@@ -48,6 +48,13 @@ Fill the **key** and **secret** values inside the **conf/custom/api.php** file w
 ## **Optional Configuration**
 
 There are some optional features (see the list below) that can be enabled from the configuration files. Every optional configuration file should be copied from **/conf/default** and store the custom version in **/conf/custom**. The bot will detect the customization and it will load the customized version.
+
+## **ESCALATION (CHAT.php)**
+
+-   **chat** 
+    -   **enabled**: Enable or disable escalation (“**true**” or “**false**”).
+-   **triesBeforeEscalation**: Number of no-result answers in a row after the bot should escalate to an agent (if available). Numeric value, not a string. Zero means it’s disabled.
+-   **negativeRatingsBeforeEscalation**: Number of negative content ratings in a row after the bot should escalate to an agent (if available). Numeric value, not a string. Zero means it’s disabled.
 
 ## **CONVERSATION (conversation.php)**
 
@@ -137,7 +144,8 @@ return [
     'credentials' => [
         'account_sid' => '',
         'assistant_sid' => ''
-    ]
+    ],
+    'transfer_function_url' => '' //Twilio function to make the transfer with an agent
 ];
 ```
 
@@ -173,6 +181,60 @@ In "Voice → A CALL COMES IN" section select **Webhook**, and paste the value o
 
 ![instructions15](public/instructions/instructions15.png)
 
+## Escalation (phone transfer)
+
+This Twilio Voice Connector has the ability to transfer a user's call from Chatbot to a predefined phone number. To do so, next configuration is required:
+
+In Twilio console, in the left menu, click on **Explore Products** and then search for **Functions**:
+
+![instructions19](public/instructions/instructions19.png)
+
+In the new menu of "Functions" click on **Overview** and then in **Create Service** button:
+
+![instructions20](public/instructions/instructions20.png)
+
+Add a new name to the service (for this example: _inbenta_) and click in **Next** button:
+
+![instructions21](public/instructions/instructions21.png)
+
+Once the previous step is done, you should be redirected to a screen with the details of the recently created service. There, you need to click in **Add +** button and then **Add Function**:
+
+![instructions22](public/instructions/instructions22.png)
+
+Set a name for the function, for this example: _/agentTransfer_
+
+![instructions23](public/instructions/instructions23.png)
+
+> Remember that function names cannot contain spaces or special characters: |;,?:@=&$()'
+
+Copy and paste the provided code for the function ([agentTransferFunction.js](#public/agentTransferFunction.js)) adding the phone number where you want to be transferred to when escalation occurs (in code, variable **poneNumber** in line 13). Click on **Save** button:
+
+![instructions24](public/instructions/instructions24.png)
+
+When the function is saved, you must make it publicly available. Click on the down arrow of your new function (in this case _/agentTransfer_) and select **Public** (by default is _Protected_):
+
+![instructions25](public/instructions/instructions25.png)
+
+Once your function is changed to Public, you'll need to deploy it. Click on **Deploy All** button:
+
+![instructions26](public/instructions/instructions26.png)
+
+When previous step is completed, click in the 3 vertical dots of the function (_/agentTransfer_), an then click in **Copy URL**:
+
+![instructions27](public/instructions/instructions27.png)
+
+This URL is needed to execute the escalation when is required. You'll paste this URL value in file **twilio.php**, in variable **transfer_function_url**:
+
+```php
+return [
+    'credentials' => [
+        'account_sid' => '',
+        'assistant_sid' => ''
+    ],
+    'transfer_function_url' => 'FUNCTION-URL' //Twilio function to make the transfer with an agent
+];
+```
+
 ## Tests
 
 In order to validate everything is properly configured, go to "Autopilot → Your bots" menu:
@@ -196,4 +258,3 @@ We should always keep in mind that user interaction is going to be through voice
 Hence, content should be simple text: **avoid the use of HTML tags, multimedia and URLs**. This is especially important if you are using Voice template, most of the HTML tags are not recognized by the TTS (Text-To-Speech) services.
 
 Note: “**Natural Language Search**” is the best **Transition type** for dialogs.
-

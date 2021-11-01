@@ -2,13 +2,19 @@
 
 namespace Inbenta\TwilioConnector\ExternalAPI;
 
-use Inbenta\TwilioConnector\ExternalDigester\TwilioDigester;
+use Inbenta\TwilioConnector\Helpers\Helper;
 
 
 class TwilioAPIClient
 {
     public $from;
     public $to;
+    protected $transferFunctionUrl;
+
+    function __construct(string $transferFunctionUrl = '')
+    {
+        $this->transferFunctionUrl = $transferFunctionUrl;
+    }
 
     /**
      * Build an external session Id using the following pattern:
@@ -83,21 +89,41 @@ class TwilioAPIClient
     /**
      * Sends a message to Twilio. Needs a message formatted with the Twilio notation
      *
-     * @param  string $message
+     * @param string $message
+     * @param bool $print
+     * @param bool $isEscalation
      * @return array
      */
-    public function sendMessage($message, $print = false)
+    public function sendMessage(string $message, bool $print = false, bool $isEscalation = false)
     {
-        $response = [
-            "actions" => [
-                [
-                    "say" => TwilioDigester::removeInitialDots($message)
-                ],
-                [
-                    "listen" => true
+        $message = Helper::removeInitialDots($message);
+        if ($isEscalation && $this->transferFunctionUrl !== '') {
+            $response = [
+                "actions" => [
+                    [
+                        "say" => $message
+                    ],
+                    [
+                        "handoff" => [
+                            "channel" => "voice",
+                            "uri" => $this->transferFunctionUrl,
+                            "method" => "POST"
+                        ]
+                    ]
                 ]
-            ]
-        ];
+            ];
+        } else {
+            $response = [
+                "actions" => [
+                    [
+                        "say" => $message
+                    ],
+                    [
+                        "listen" => true
+                    ]
+                ]
+            ];
+        }
 
         if (!$print) {
             return $response;
@@ -107,7 +133,6 @@ class TwilioAPIClient
         echo json_encode($response, JSON_UNESCAPED_SLASHES);
         die;
     }
-
 
     /**
      *   Method needed
@@ -119,15 +144,17 @@ class TwilioAPIClient
 
     /**
      * Sends a message to Twilio. Needs a message formatted with the Twilio notation
+     * @param string $text
+     * @param bool $isEscalation = false
      */
-    public function sendTextMessage($text)
+    public function sendTextMessage(string $text, bool $isEscalation = false)
     {
         $message = $text;
         if (strpos($text, "<") !== false) { //If text has a type of html tags
-            $digester = new TwilioDigester(null, null, null);
-            $digester->handleMessageWithLinks($text);
-            $message = $digester->cleanMessage($text);
+            $text = Helper::handleMessageWithLinks($text);
         }
-        $this->sendMessage($message, true);
+        $message = Helper::cleanMessage($text);
+        $printResponse = $isEscalation;
+        $this->sendMessage($message, $printResponse, $isEscalation);
     }
 }

@@ -4,11 +4,113 @@ namespace Inbenta\TwilioConnector\Helpers;
 
 class Helper
 {
+
+    /**
+     * Remove the common html tags from the message and set the final message
+     * @param string $message
+     */
+    public static function cleanMessage(string $message)
+    {
+        $message = str_ireplace(["’", "&sbquo;"], "'", $message);
+        $message = str_replace('&nbsp;', ' ', $message);
+        $message = str_replace("\u{00a0}", ' ', $message);
+        $message = str_replace(["\t"], '', $message);
+        $message = str_replace("&#13;", ". ", $message);
+        $message = str_replace('  ', ' ', $message);
+        $breaks = ["<br />", "<br>", "<br/>", "<p>", "\r\n", "\n"];
+        $message = str_ireplace($breaks, ". ", $message);
+        $message = strip_tags($message);
+        $message = self::removeRepeatedDots($message);
+        $message = self::removeFinalDots($message);
+        return $message;
+    }
+
+    /**
+     * Remove initial dots of the message (if exists), before print it
+     * @param string $message
+     */
+    public static function removeInitialDots(string $message)
+    {
+        $message = trim($message);
+        if (strpos($message, '.') === 0) {
+            $message = substr($message, 1);
+            $message = self::removeInitialDots($message);
+        }
+        return $message;
+    }
+
+    /**
+     * Remove final dots of the message (if exists)
+     * @param string $message
+     */
+    public static function removeFinalDots(string $message)
+    {
+        $message = trim($message);
+        if (strrpos($message, ".") === strlen($message) - 1) {
+            $message = substr($message, 0, strlen($message) - 1);
+            $message = self::removeFinalDots($message);
+        }
+        return $message;
+    }
+
+    /**
+     * Remove middle dots
+     * @param string $message
+     */
+    public static function removeRepeatedDots(string $message)
+    {
+        if (strpos($message, ". . ") !== false) {
+            $message = str_replace(". . ", ". ", $message);
+            $message = self::removeRepeatedDots($message);
+        }
+        if (strpos($message, ".. ") !== false) {
+            $message = str_replace(".. ", ". ", $message);
+            $message = self::removeRepeatedDots($message);
+        }
+        return $message;
+    }
+
+    /**
+     * Format the link as part of the message
+     * @param string $message
+     */
+    public static function handleMessageWithLinks($message)
+    {
+        if ($message !== "") {
+            $dom = new \DOMDocument();
+            @$dom->loadHTML('<?xml encoding="utf-8"? >' . $message);
+            $nodes = $dom->getElementsByTagName('a');
+
+            $urls = [];
+            $value = [];
+            foreach ($nodes as $node) {
+                $urls[] = $node->getAttribute('href');
+                $value[] = trim($node->nodeValue);
+            }
+
+            if (strpos($message, '<a ') !== false && count($urls) > 0) {
+                $countLinks = substr_count($message, "<a ");
+                $lastPosition = 0;
+                for ($i = 0; $i < $countLinks; $i++) {
+                    $firstPosition = strpos($message, "<a ", $lastPosition);
+                    $lastPosition = strpos($message, "</a>", $firstPosition);
+
+                    if (isset($urls[$i]) && $lastPosition > 0) {
+                        $aTag = substr($message, $firstPosition, $lastPosition - $firstPosition + 4);
+                        $textToReplace = $value[$i] !== "" ? $value[$i] . " (" . $urls[$i] . ")" : $urls[$i];
+                        $message = str_replace($aTag, $textToReplace, $message);
+                    }
+                }
+            }
+        }
+        return $message;
+    }
+
     public static function removeAccentsToLower($string)
     {
         return strtolower(self::removeAccents($string));
     }
-    
+
     public static function removeAccents($string)
     {
         if (!preg_match('/[\x80-\xff]/', $string))

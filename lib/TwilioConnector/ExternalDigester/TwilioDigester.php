@@ -67,7 +67,7 @@ class TwilioDigester extends DigesterInterface
         } else if (count($output) == 0) {
             //No message to bot
             //Launch the response for unknow request
-            $output[0] = ['message' => 'x'];
+            $output[0] = ['message' => ''];
         }
         return $output;
     }
@@ -81,7 +81,7 @@ class TwilioDigester extends DigesterInterface
     {
         $output = [];
         if ($this->session->has('options')) {
-
+            $userMessage = Helper::removeFinalDots($userMessage);
             $lastUserQuestion = $this->session->get('lastUserQuestion');
             $options = $this->session->get('options');
             $this->session->delete('options');
@@ -89,18 +89,24 @@ class TwilioDigester extends DigesterInterface
 
             $selectedOption = false;
             $selectedOptionText = "";
+            $selectedEscalation = "";
             $isListValues = false;
             $isPolar = false;
+            $isEscalation = false;
             $optionSelected = false;
             foreach ($options as $option) {
                 if (isset($option->list_values)) {
                     $isListValues = true;
                 } else if (isset($option->is_polar)) {
                     $isPolar = true;
+                } else if (isset($option->escalate)) {
+                    $isEscalation = true;
                 }
                 if (Helper::removeAccentsToLower($userMessage) === Helper::removeAccentsToLower($this->langManager->translate($option->label))) {
                     if ($isListValues) {
                         $selectedOptionText = $option->label;
+                    } else if ($isEscalation) {
+                        $selectedEscalation = $option->escalate;
                     } else {
                         $selectedOption = $option;
                         $lastUserQuestion = isset($option->title) && !$isPolar ? $option->title : $lastUserQuestion;
@@ -123,13 +129,17 @@ class TwilioDigester extends DigesterInterface
                     }
                 } else if ($isPolar) { //For polar, on wrong answer, goes for NO
                     $output[0]['message'] = $this->langManager->translate('no');
+                } else if ($isEscalation) {
+                    $output[0] = ['escalateOption' => false];
                 }
-            }
-
-            if ($selectedOption) {
-                $output[0]['option'] = $selectedOption->value;
-            } else if ($selectedOptionText !== "") {
-                $output[0]['message'] = $selectedOptionText;
+            } else {
+                if ($selectedOption) {
+                    $output[0]['option'] = $selectedOption->value;
+                } else if ($selectedOptionText !== "") {
+                    $output[0]['message'] = $selectedOptionText;
+                } else if ($isEscalation && $selectedEscalation !== "") {
+                    $output[0] = ['escalateOption' => $selectedEscalation];
+                }
             }
         }
         return $output;
@@ -242,10 +252,10 @@ class TwilioDigester extends DigesterInterface
         }
 
         $this->handleMessageWithActionField($message, $messageTxt, $lastUserQuestion);
-        $this->handleMessageWithLinks($messageTxt);
+        $messageTxt = Helper::handleMessageWithLinks($messageTxt);
 
         // Add simple text-answer
-        $output = $this->cleanMessage($messageTxt);
+        $output = Helper::cleanMessage($messageTxt);
 
         return $output;
     }
@@ -253,11 +263,10 @@ class TwilioDigester extends DigesterInterface
 
     protected function digestFromApiMultipleChoiceQuestion($message, $lastUserQuestion, $isPolar = false)
     {
-        $output = $this->cleanMessage($message->message);
+        $output = Helper::cleanMessage($message->message);
 
         $options = $message->options;
-        foreach ($options as $i => &$option) {
-            $option->opt_key = $i + 1;
+        foreach ($options as &$option) {
             if (isset($option->attributes->title) && !$isPolar) {
                 $option->title = $option->attributes->title;
             } elseif ($isPolar) {
@@ -279,7 +288,7 @@ class TwilioDigester extends DigesterInterface
 
     protected function digestFromApiExtendedContentsAnswer($message, $lastUserQuestion)
     {
-        $output = $this->cleanMessage($message->message);
+        $output = Helper::cleanMessage($message->message);
 
         $messageTitle = [];
         $messageExtended = [];
@@ -318,7 +327,7 @@ class TwilioDigester extends DigesterInterface
                 $this->session->set('federatedSubanswers', $message->subAnswers);
             }
         }
-        $output .= $this->cleanMessage($messageTmp);
+        $output .= Helper::cleanMessage($messageTmp);
 
         return $output;
     }
@@ -354,32 +363,13 @@ class TwilioDigester extends DigesterInterface
     }
 
     /**
-     * Remove the common html tags from the message and set the final message
-     * @param string $message
-     */
-    public function cleanMessage(string $message)
-    {
-        $message = str_replace('&nbsp;', ' ', $message);
-        $message = str_replace("\u{00a0}", ' ', $message);
-        $message = str_replace(["\t"], '', $message);
-        $message = str_replace("&#13;", ". ", $message);
-        $breaks = ["<br />", "<br>", "<br/>", "<p>", "\r\n", "\n"];
-        $message = str_ireplace($breaks, ". ", $message);
-        $message = strip_tags($message);
-        $message = $this->removeRepeatedDots($message);
-        $message = $this->removeFinalDots($message);
-        return $message;
-    }
-
-    /**
      * Set the options for message with list values
      */
     protected function handleMessageWithListValues($listValues, $lastUserQuestion)
     {
         $optionList = "";
         $options = $listValues->values;
-        foreach ($options as $i => &$option) {
-            $option->opt_key = $i + 1;
+        foreach ($options as &$option) {
             $option->list_values = true;
             $option->label = $option->option;
             $optionList .= ". " . $option->label;
@@ -392,40 +382,6 @@ class TwilioDigester extends DigesterInterface
     }
 
     /**
-     * Format the link as part of the message
-     */
-    public function handleMessageWithLinks(&$messageTxt)
-    {
-        if ($messageTxt !== "") {
-            $dom = new \DOMDocument();
-            @$dom->loadHTML('<?xml encoding="utf-8"? >' . $messageTxt);
-            $nodes = $dom->getElementsByTagName('a');
-
-            $urls = [];
-            $value = [];
-            foreach ($nodes as $node) {
-                $urls[] = $node->getAttribute('href');
-                $value[] = trim($node->nodeValue);
-            }
-
-            if (strpos($messageTxt, '<a ') !== false && count($urls) > 0) {
-                $countLinks = substr_count($messageTxt, "<a ");
-                $lastPosition = 0;
-                for ($i = 0; $i < $countLinks; $i++) {
-                    $firstPosition = strpos($messageTxt, "<a ", $lastPosition);
-                    $lastPosition = strpos($messageTxt, "</a>", $firstPosition);
-
-                    if (isset($urls[$i]) && $lastPosition > 0) {
-                        $aTag = substr($messageTxt, $firstPosition, $lastPosition - $firstPosition + 4);
-                        $textToReplace = $value[$i] !== "" ? $value[$i] . " (" . $urls[$i] . ")" : $urls[$i];
-                        $messageTxt = str_replace($aTag, $textToReplace, $messageTxt);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
      *	Disabled for Twilio Voice
      */
     protected function buildUrlButtonMessage($message, $urlButton)
@@ -434,57 +390,27 @@ class TwilioDigester extends DigesterInterface
     }
 
     /**
-     * Disabled for Twilio Voice
      * Build the message and options to escalate
      * @return array
      */
     public function buildEscalationMessage()
     {
-        return [];
-    }
+        $escalateOptions = [
+            (object) [
+                "label" => 'yes',
+                "escalate" => true
+            ],
+            (object) [
+                "label" => 'no',
+                "escalate" => false
+            ],
+        ];
 
-    /**
-     * Remove initial dots of the message (if exists), before print it
-     * @param string $message
-     */
-    public static function removeInitialDots(string $message)
-    {
-        $message = trim($message);
-        if (strpos($message, '.') === 0) {
-            $message = substr($message, 1);
-            $message = self::removeInitialDots($message);
-        }
-        return $message;
-    }
+        $this->session->set('options', (object) $escalateOptions);
+        $message = $this->langManager->translate('ask_to_escalate');
+        $message .= ". " . $this->langManager->translate('yes');
+        $message .= ". " . $this->langManager->translate('no');
 
-    /**
-     * Remove final dots of the message (if exists)
-     * @param string $message
-     */
-    protected function removeFinalDots(string $message)
-    {
-        $message = trim($message);
-        if (strrpos($message, ".") === strlen($message) - 1) {
-            $message = substr($message, 0, strlen($message) - 1);
-            $message = $this->removeFinalDots($message);
-        }
-        return $message;
-    }
-
-    /**
-     * Remove middle dots
-     * @param string $message
-     */
-    protected function removeRepeatedDots(string $message)
-    {
-        if (strpos($message, ". . ") !== false) {
-            $message = str_replace(". . ", ". ", $message);
-            $message = $this->removeRepeatedDots($message);
-        }
-        if (strpos($message, ".. ") !== false) {
-            $message = str_replace(".. ", ". ", $message);
-            $message = $this->removeRepeatedDots($message);
-        }
         return $message;
     }
 }
